@@ -243,9 +243,9 @@ def get_universe(Y):
         if n_valid < MIN_OBS:
             continue
 
-        # Filter 3: stale prices
-        n_zero = (row.abs() < 1e-10).sum()
-        if n_zero / n_valid >= STALE_THR:
+        # Filter 3: stale prices (Fixed to precisely match data_exploration.py)
+        n_zero = ((row == 0) | (row.abs() < 1e-10)).sum()
+        if (n_zero / n_valid) > STALE_THR:
             continue
 
         # Filter 4: CO2 Scope 1 AND Scope 2 available
