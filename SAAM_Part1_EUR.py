@@ -22,6 +22,7 @@ STALE_THR = 0.30  # max zero-return fraction
 LOW_FLOOR = 0.50  # RI values below this → NaN
 ALPHA_REG = 1e-4  # diagonal regularisation for Σ
 DATA_PATH = "Data_2026/"
+TEMPLATE_PATH = "Data_2026/Template_for_Part_I-SAAM.xlsx"
 OUT = "Output_2026/"
 
 print("=" * 65)
@@ -488,24 +489,36 @@ print("\n[8] Performance statistics ...")
 
 
 def compute_perf(rp, rf_s, label):
-    """Compute standard performance metrics."""
+    """Compute standard performance metrics.
+
+    Annualised return:
+      - Arithmetic: 12 × mean(R_monthly)                    [Lecture 5, slide 12]
+      - Geometric:  (1 + R_cum)^(12/T) − 1                  [Lecture 5, slide 13]
+    Sharpe ratio uses the arithmetic return for consistency with
+    the annualisation SR^(y) = sqrt(12) × SR^(m)             [Lecture 5, slide 12]
+    """
     rp = rp.dropna()
     rf = rf_s.reindex(rp.index).ffill().fillna(0)
+    T = len(rp)
 
-    # Annualised return (geometric)
-    mu_ann = (1 + rp.mean()) ** 12 - 1
-    # Annualised volatility
+    # Arithmetic annualised return: R̄_p^(y) = 12 × R̄_p^(m)
+    mu_arith = 12 * rp.mean()
+    # Geometric annualised return: (1 + R_cum)^(12/T) − 1
+    mu_geom = (1 + rp).prod() ** (12 / T) - 1
+    # Annualised volatility: σ_p^(y) = √12 × σ_p^(m)
     sig_ann = rp.std() * np.sqrt(12)
-    # Sharpe ratio
-    rf_ann = (1 + rf.mean()) ** 12 - 1
-    SR = (mu_ann - rf_ann) / sig_ann
+    # Arithmetic annualised risk-free rate (same convention)
+    rf_ann = 12 * rf.mean()
+    # Sharpe ratio (arithmetic, consistent with slide 12)
+    SR = (mu_arith - rf_ann) / sig_ann
     # Drawdown
     cum = (1 + rp).cumprod()
     mdd = ((cum - cum.cummax()) / cum.cummax()).min()
 
     return {
         "Portfolio": label,
-        "Ann. Return (%)": round(mu_ann * 100, 2),
+        "Ann. Return Arith. (%)": round(mu_arith * 100, 2),
+        "Ann. Return Geom. (%)": round(mu_geom * 100, 2),
         "Ann. Vol (%)": round(sig_ann * 100, 2),
         "Sharpe": round(SR, 3),
         "Min Mo. (%)": round(rp.min() * 100, 2),
@@ -644,27 +657,109 @@ plt.close()
 print("   Figures saved.")
 
 # =============================================================================
-# 14. EXCEL EXPORT
+# 14. EXCEL EXPORT — Official Template Format
 # =============================================================================
-print("\n[12] Exporting Excel ...")
-xlsx = f"{OUT}SAAM_Part1_EUR_results.xlsx"
+print("\n[12] Exporting Excel (official template format) ...")
+from openpyxl import load_workbook
+from openpyxl.drawing.image import Image as XlImage
 
-with pd.ExcelWriter(xlsx, engine="openpyxl") as writer:
-    # Summary stats
+# --- Helper: compute stats as decimals (not percentages) ---
+def template_stats(rp, rf_s):
+    """Return dict of stats as decimals for the template."""
+    rp = rp.dropna()
+    rf = rf_s.reindex(rp.index).ffill().fillna(0)
+    T = len(rp)
+    mu_arith = 12 * rp.mean()                          # slide 12
+    mu_geom = (1 + rp).prod() ** (12 / T) - 1          # slide 13
+    sig_ann = rp.std() * np.sqrt(12)
+    rf_ann = 12 * rf.mean()
+    SR = (mu_arith - rf_ann) / sig_ann
+    return {
+        "ann_avg_ret": mu_arith,      # Row 3: Annualized average return
+        "ann_vol": sig_ann,            # Row 4: Annualized volatility
+        "ann_cum_ret": mu_geom,        # Row 5: Annualized cumulative return
+        "sharpe": SR,                  # Row 6: Sharp ratio
+        "min_mo": rp.min(),            # Row 7: Minimum monthly return
+        "max_mo": rp.max(),            # Row 8: Maximum monthly return
+    }
+
+vw_stats = template_stats(rp_vw, rf_mon)
+mv_stats = template_stats(rp_mv, rf_mon)
+
+# --- Fill the template ---
+template_path = TEMPLATE_PATH
+xlsx_out = f"{OUT}SAAM_Part1_EUR_template.xlsx"
+
+wb = load_workbook(template_path)
+ws = wb["Sheet1"]
+
+# Left section: summary statistics (B=VW col 2, C=MV col 3)
+stat_keys = ["ann_avg_ret", "ann_vol", "ann_cum_ret", "sharpe", "min_mo", "max_mo"]
+for i, key in enumerate(stat_keys):
+    ws.cell(row=3 + i, column=2, value=round(vw_stats[key], 8))
+    ws.cell(row=3 + i, column=3, value=round(mv_stats[key], 8))
+
+# Row 9: insert cumulative return plot
+cum_plot_path = f"{OUT}SAAM_Part1_EUR_cumulative.png"
+fig_cum, ax_cum = plt.subplots(figsize=(7, 4))
+cm = (1 + rp_mv.dropna()).cumprod()
+cv = (1 + rp_vw.dropna()).cumprod()
+ax_cum.plot(cm.index, cm.values, color="steelblue", lw=1.8,
+            label=r"Min-Var $P_{oos}^{(mv)}$")
+ax_cum.plot(cv.index, cv.values, color="darkorange", lw=1.8, ls="--",
+            label=r"Val-Wgt $P^{(vw)}$")
+ax_cum.set_title("Cumulative Return (base=1, Jan 2014)")
+ax_cum.set_ylabel("Cumulative return")
+ax_cum.legend(fontsize=9)
+ax_cum.grid(alpha=0.3)
+ax_cum.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+ax_cum.xaxis.set_major_locator(mdates.YearLocator(2))
+fig_cum.tight_layout()
+fig_cum.savefig(cum_plot_path, dpi=150, bbox_inches="tight")
+plt.close(fig_cum)
+
+img = XlImage(cum_plot_path)
+img.width = 500
+img.height = 280
+ws.add_image(img, "B9")
+
+# Right section: monthly returns (E=dates col 5, F=VW col 6, G=MV col 7)
+# Template already has dates in column E, rows 3 to 146 (144 months)
+# Datastream dates are last *business* day, not calendar month-end,
+# so we match on (year, month) instead of exact timestamp.
+vw_by_ym = {(d.year, d.month): v for d, v in rp_vw.items()}
+mv_by_ym = {(d.year, d.month): v for d, v in rp_mv.items()}
+
+for row_idx in range(3, 3 + 144):
+    date_cell = ws.cell(row=row_idx, column=5).value
+    if date_cell is None:
+        continue
+    dt = pd.Timestamp(date_cell)
+    ym = (dt.year, dt.month)
+    vw_val = vw_by_ym.get(ym, np.nan)
+    mv_val = mv_by_ym.get(ym, np.nan)
+    ws.cell(row=row_idx, column=6, value=round(float(vw_val), 8)
+            if not np.isnan(vw_val) else None)
+    ws.cell(row=row_idx, column=7, value=round(float(mv_val), 8)
+            if not np.isnan(mv_val) else None)
+
+wb.save(xlsx_out)
+print(f"   Template saved: {xlsx_out}")
+
+# --- Also save the extended results workbook (for your own reference) ---
+xlsx_ext = f"{OUT}SAAM_Part1_EUR_results.xlsx"
+with pd.ExcelWriter(xlsx_ext, engine="openpyxl") as writer:
     stats_df.to_excel(writer, sheet_name="Summary_Stats")
 
-    # Monthly returns
     ro = pd.DataFrame({"Min-Var": rp_mv, "Value-Weighted": rp_vw})
     ro.index = ro.index.strftime("%Y-%m")
     ro.to_excel(writer, sheet_name="Monthly_Returns")
 
-    # Weights by year
     wd = pd.DataFrame(mv_w_dict).T.fillna(0)
     wd.index.name = "Year"
     wd.rename(columns=isin_name, inplace=True)
     wd.to_excel(writer, sheet_name="MV_Weights")
 
-    # Top 10 holdings per year
     rows = []
     for Y in sorted(mv_w_dict):
         for rk, (i, wt) in enumerate(
@@ -679,6 +774,6 @@ with pd.ExcelWriter(xlsx, engine="openpyxl") as writer:
             })
     pd.DataFrame(rows).to_excel(writer, sheet_name="Top10_Holdings", index=False)
 
-print(f"   Saved: {xlsx}")
+print(f"   Extended results saved: {xlsx_ext}")
 print("\n" + "=" * 65)
 print("DONE — outputs in", OUT)
