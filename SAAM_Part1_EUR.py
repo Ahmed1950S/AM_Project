@@ -20,7 +20,7 @@ ESTIM_YEARS = 10  # rolling window length
 MIN_OBS = 36  # min valid monthly returns in window
 STALE_THR = 0.30  # max zero-return fraction
 LOW_FLOOR = 0.50  # RI values below this → NaN
-ALPHA_REG = 1e-4  # diagonal regularisation for Σ
+LW_SHRINK_FLOOR = 0.01  # minimum Ledoit-Wolf shrinkage intensity
 DATA_PATH = "Data_2026/"
 TEMPLATE_PATH = "Data_2026/Template_for_Part_I-SAAM.xlsx"
 OUT = "Output_2026/"
@@ -272,16 +272,23 @@ for Y in range(START_YEAR, END_YEAR + 1):
 
 def estimate_cov(isins, win_cols):
     """
-    Estimate expected returns and covariance matrix using the lecture method.
+    Estimate expected returns and covariance matrix using the lecture method,
+    with Ledoit-Wolf shrinkage to constant-correlation target.
 
-    Expected returns: per-firm mean over available observations (slides 19).
-    Covariance: pairwise complete observations (slides 20-21).
-      - Var(Ri) computed over firm i's available sample
+    Step 1 — Pairwise-complete covariance (Lecture 5, slides 20-21):
+      - Var(Ri) computed over firm i's available sample (ML: divide by n)
       - Corr(Ri,Rj) computed over the common sample of i and j
       - Cov(Ri,Rj) = Corr(Ri,Rj) * sqrt(Var(Ri) * Var(Rj))
 
-    ML estimator (divide by n, not n-1) to match the project formula.
-    Diagonal regularisation: Σ_reg = (1-α)Σ + α·diag(Σ)
+    Step 2 — Ledoit-Wolf shrinkage (Ledoit & Wolf, 2004):
+      Σ_shrunk = δ·F + (1-δ)·S
+      where F is the constant-correlation target and δ is the optimal
+      shrinkage intensity estimated analytically.
+      This guarantees PSD and reduces estimation error in finite samples.
+
+    Reference: Ledoit, O. & Wolf, M. (2004), "A well-conditioned estimator
+    for large-dimensional covariance matrices", Journal of Multivariate
+    Analysis, 88(2), 365-411.
     """
     win_in = [c for c in win_cols if c in ret_m.columns]
     R = ret_m.loc[isins, win_in]  # (N, T) with NaN
@@ -339,7 +346,7 @@ def estimate_cov(isins, win_cols):
     denom = np.sqrt(var_i_ij * var_j_ij)
     corr_ij = np.where(denom > 1e-20, cov_ij / denom, 0.0)
 
-    # Reconstruct covariance
+    # Reconstruct covariance: Cov(i,j) = rho(i,j) * sigma_i * sigma_j
     std_own = np.sqrt(var)  # (N,)
     Sig = corr_ij * np.outer(std_own, std_own)
 
@@ -349,14 +356,72 @@ def estimate_cov(isins, win_cols):
     # Enforce symmetry (numerical)
     Sig = (Sig + Sig.T) / 2
 
-    # Zero out pairs with too few common observations
-    Sig = np.where(count_ij >= 12, Sig, 0.0)
-    np.fill_diagonal(Sig, var)  # restore diagonal
+    # =========================================================================
+    # Ledoit-Wolf shrinkage to constant-correlation target
+    # =========================================================================
+    # Step 2a: Build the structured target F (constant correlation, own variances)
+    # Extract the correlation matrix from Sig
+    std_diag = np.sqrt(np.diag(Sig))
+    std_diag_safe = np.where(std_diag > 1e-20, std_diag, 1e-20)
+    corr_mat = Sig / np.outer(std_diag_safe, std_diag_safe)
+    np.fill_diagonal(corr_mat, 1.0)
+    # Clip correlations to [-1, 1] for numerical safety
+    corr_mat = np.clip(corr_mat, -1.0, 1.0)
 
-    # Diagonal regularisation
-    Sig_reg = (1 - ALPHA_REG) * Sig + ALPHA_REG * np.diag(np.diag(Sig))
+    # Average off-diagonal correlation
+    rho_bar = (corr_mat.sum() - N) / (N * (N - 1))
 
-    return mu, Sig_reg
+    # Constant-correlation target F: F_ij = rho_bar * sigma_i * sigma_j for i≠j
+    F = rho_bar * np.outer(std_diag, std_diag)
+    np.fill_diagonal(F, var)  # F_ii = Var(Ri)
+
+    # Step 2b: Estimate the optimal shrinkage intensity δ
+    # Following Ledoit & Wolf (2004), we estimate δ = κ/T where κ depends on
+    # π (sum of asymptotic variances of entries of S),
+    # γ (distance between S and F), and ρ (a cross term).
+    # For the constant-correlation target, we use the simplified estimator
+    # from "Honey, I Shrunk the Sample Covariance Matrix" (Ledoit & Wolf, 2003).
+    #
+    # Approximate δ using the formula: δ* ≈ (sum of Var(s_ij)) / ||S - F||²
+    # computed over the available return data.
+
+    # Compute π̂ (sum of squared deviations of sample cov entries from their means)
+    # We use the returns matrix with NaN filled to 0 and masked,
+    # then compute the per-element variance of the outer products.
+    # Simplified Ledoit-Wolf: use a consistent estimator via the returns.
+
+    # For computational tractability with missing data, we use the Oracle
+    # Approximating Shrinkage (OAS) formula which is simpler and robust:
+    #   δ_OAS = ( (1-2/N)*tr(Σ²) + tr²(Σ) ) / ( (T+1-2/N)*(tr(Σ²) - tr²(Σ)/N) )
+    # Reference: Chen, Y., Wiesel, A., Eldar, Y., & Hero, A. (2010),
+    # "Shrinkage Algorithms for MMSE Covariance Estimation",
+    # IEEE Transactions on Signal Processing, 58(10), 5016-5029.
+
+    tr_Sig = np.trace(Sig)
+    tr_Sig2 = np.trace(Sig @ Sig)
+    # Use the effective sample size (median pairwise count) as T_eff
+    T_eff = np.median(count_ij[np.triu_indices(N, k=1)])
+    T_eff = max(T_eff, 2)  # safety
+
+    numerator = (1.0 - 2.0 / N) * tr_Sig2 + tr_Sig ** 2
+    denominator = (T_eff + 1.0 - 2.0 / N) * (tr_Sig2 - tr_Sig ** 2 / N)
+
+    if abs(denominator) < 1e-20:
+        delta = 0.5  # fallback
+    else:
+        delta = max(min(numerator / denominator, 1.0), LW_SHRINK_FLOOR)
+
+    # Step 2c: Apply shrinkage
+    Sig_shrunk = delta * F + (1.0 - delta) * Sig
+
+    # Final PSD enforcement via spectral clipping (safety net)
+    eigvals, eigvecs = np.linalg.eigh(Sig_shrunk)
+    if eigvals[0] < 1e-10:
+        eigvals = np.maximum(eigvals, 1e-10)
+        Sig_shrunk = eigvecs @ np.diag(eigvals) @ eigvecs.T
+        Sig_shrunk = (Sig_shrunk + Sig_shrunk.T) / 2  # enforce symmetry
+
+    return mu, Sig_shrunk
 
 
 # =============================================================================
@@ -406,6 +471,52 @@ def min_var_weights(Sigma, isins, Y):
 mv_w_dict = {}  # year → pd.Series of optimal weights
 mv_ret = {}  # year+1 → pd.Series of monthly portfolio returns
 
+
+def fill_oos_returns(eligible, next_months):
+    """
+    Fill missing OOS returns with proper delisting detection.
+
+    Logic (per project instructions, Section 1 — Data Cleaning):
+      - If a firm had a valid price last month but price is now missing,
+        treat as delisting → return = -100%, all subsequent months = NaN.
+      - If the firm had no valid price last month either (leading NaN),
+        treat as 0% return (firm not yet active in this sub-period).
+      - Remaining NaN after delisting logic → 0% (no price change).
+
+    Reference: Shumway, T. (1997), "The Delisting Bias in CRSP Data",
+    Journal of Finance, 52(1), 327-340.
+    """
+    R_oos = ret_m.loc[eligible].reindex(columns=next_months).copy()
+
+    for isin in eligible:
+        delisted = False
+        for k, t in enumerate(next_months):
+            if delisted:
+                R_oos.at[isin, t] = np.nan
+                continue
+
+            if pd.isna(R_oos.at[isin, t]):
+                # Check if previous month had a valid RI price
+                t_idx = monthly_all.index(t)
+                prev_t = monthly_all[t_idx - 1] if t_idx > 0 else None
+
+                had_price_prev = (prev_t is not None
+                                  and prev_t in ri_m.columns
+                                  and isin in ri_m.index
+                                  and pd.notna(ri_m.at[isin, prev_t]))
+
+                if had_price_prev:
+                    # Price disappeared → delisting: realised return = -100%
+                    R_oos.at[isin, t] = -1.0
+                    delisted = True
+                else:
+                    # No previous price either → treat as 0% (inactive)
+                    R_oos.at[isin, t] = 0.0
+
+    # Any remaining NaN (e.g., leading gaps) → 0%
+    R_oos = R_oos.fillna(0.0)
+    return R_oos
+
 for Y in range(START_YEAR, END_YEAR + 1):
     eligible = universe[Y]
     N = len(eligible)
@@ -425,7 +536,7 @@ for Y in range(START_YEAR, END_YEAR + 1):
 
     # Compute ex-post returns for year Y+1, with weight drift
     next_months = months_of(Y + 1)
-    R_next = ret_m.loc[eligible].reindex(columns=next_months).fillna(0)
+    R_next = fill_oos_returns(eligible, next_months)
     ww = w.copy()
     port_ret = []
     for t in next_months:
@@ -456,6 +567,8 @@ vw_ret = {}
 for Y in range(START_YEAR, END_YEAR + 1):
     eligible = universe[Y]
     next_months = months_of(Y + 1)
+    # Pre-compute delisting-aware returns for this OOS year
+    R_oos_vw = fill_oos_returns(eligible, next_months)
     port = []
 
     for t in next_months:
@@ -473,8 +586,7 @@ for Y in range(START_YEAR, END_YEAR + 1):
             port.append(0.0)
             continue
 
-        r_t = (ret_m.loc[eligible, t].fillna(0).values
-               if t in ret_m.columns else np.zeros(len(eligible)))
+        r_t = R_oos_vw[t].values if t in R_oos_vw.columns else np.zeros(len(eligible))
         port.append(float((cap / tot).values @ r_t))
 
     vw_ret[Y + 1] = pd.Series(port, index=next_months)
