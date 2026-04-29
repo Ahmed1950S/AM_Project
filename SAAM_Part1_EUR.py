@@ -1,8 +1,3 @@
-"""
-SAAM Project 2026 — Part I: Standard Portfolio Allocation
-Region: EUR | CO2 Scope: 1 + 2
-"""
-
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -131,15 +126,27 @@ rf_raw = rf_raw.dropna(subset=["YYYYMM"])
 rf_raw["date"] = pd.to_datetime(rf_raw["YYYYMM"].astype(int).astype(str), format="%Y%m")
 rf_raw["date"] = rf_raw["date"] + pd.offsets.MonthEnd(0)
 
-# RF_pct is the annual rate in percent → compound to monthly decimal
-# Monthly rate = (1 + annual_rate)^(1/12) - 1
-rf_mon = ((1 + rf_raw.set_index("date")["RF_pct"] / 100) ** (1 / 12) - 1)
+# RF_pct is the MONTHLY rate expressed in percent (Fama-French convention).
+# Just convert percent → decimal. Annualisation happens later in compute_perf
+# via rf_ann = 12 × mean(rf_monthly), to match how portfolio returns are annualised.
+rf_mon = rf_raw.set_index("date")["RF_pct"] / 100
 rf_mon = rf_mon.squeeze()
 rf_mon.name = "RF"
 
 print(f"   RF range: {rf_mon.index.min().strftime('%Y-%m')} to "
       f"{rf_mon.index.max().strftime('%Y-%m')}")
 print(f"   RF sample 2014-01: {rf_mon.loc['2014-01'].values[0]:.6f} (monthly)")
+
+# --- Sanity check: annualised avg rf in our sample window should be in a
+# plausible T-bill range (~0.5%–5% over 2014–2025). If not, the conversion
+# above is wrong. This catches the common mistake of compounding monthly
+# rates as if they were annual.
+_rf_ann_check = rf_mon.loc["2014-01-01":"2025-12-31"].mean() * 12
+assert 0.005 < _rf_ann_check < 0.05, (
+    f"Annualised avg rf = {_rf_ann_check:.4%} — outside plausible range. "
+    f"Check whether RF_pct is monthly (correct) or annual (needs ^(1/12))."
+)
+print(f"   Sanity: annualised avg rf over 2014-2025 = {_rf_ann_check*100:.4f}%")
 
 # =============================================================================
 # 5. PRICE CLEANING
