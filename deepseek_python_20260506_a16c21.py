@@ -1,13 +1,3 @@
-# %% [markdown]
-# # SAAM Part I — Minimum Variance Portfolio (EUR Region)
-# 
-# This notebook implements the Systematic Asset Allocation Methodology (SAAM) for EUR region portfolios.
-# It covers minimum variance optimization, carbon-aware portfolios, and net-zero glide paths.
-
-# %% [markdown]
-# ## Setup and Configuration
-
-# %%
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -17,7 +7,7 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-# Configuration
+# ─── Configuration ────────────────────────────────────────────────────────────
 REGION = "EUR"
 START_YEAR = 2013
 END_YEAR = 2024
@@ -34,10 +24,9 @@ print("=" * 65)
 print("SAAM Part I — Minimum Variance Portfolio (EUR region)")
 print("=" * 65)
 
-# %% [markdown]
-# ## 1. Load Raw Data
-
-# %%
+# =============================================================================
+# 1. LOAD RAW DATA
+# =============================================================================
 print("\n[1] Loading raw data ...")
 
 static = pd.read_excel(DATA_PATH + "Static_2025.xlsx")
@@ -53,10 +42,9 @@ rf_raw = pd.read_excel(DATA_PATH + "Risk_Free_Rate_2025.xlsx",
 
 print(f"   Static: {static.shape}, RI monthly: {ri_m_raw.shape}")
 
-# %% [markdown]
-# ## 2. Clean Datastream Format
-
-# %%
+# =============================================================================
+# 2. CLEAN DATASTREAM FORMAT
+# =============================================================================
 print("\n[2] Cleaning Datastream format ...")
 
 
@@ -92,10 +80,9 @@ rev, _ = clean_ds(rev_raw, eur_isins)
 isin_name = firm_names.to_dict()
 print(f"   EUR firms loaded: {ri_m.shape[0]}")
 
-# %% [markdown]
-# ## 3. Build Date Lists
-
-# %%
+# =============================================================================
+# 3. BUILD DATE LISTS
+# =============================================================================
 monthly_all = sorted([c for c in ri_m.columns if isinstance(c, pd.Timestamp)
                       and pd.Timestamp("2000-01-01") <= c <= pd.Timestamp("2025-12-31")])
 annual_all = sorted([c for c in ri_y.columns if isinstance(c, (int, np.integer))])
@@ -128,10 +115,9 @@ print(f"   Estimation window Dec 2013: {len(ew2013)} months "
       f"({ew2013[0].strftime('%Y-%m')} to {ew2013[-1].strftime('%Y-%m')})")
 assert len(ew2013) == 120, f"Expected 120, got {len(ew2013)}"
 
-# %% [markdown]
-# ## 4. Risk-Free Rate
-
-# %%
+# =============================================================================
+# 4. RISK-FREE RATE
+# =============================================================================
 print("\n[3] Processing risk-free rate ...")
 
 rf_raw.columns = ["YYYYMM", "RF_pct"]
@@ -145,10 +131,9 @@ rf_mon.name = "RF"
 print(f"   RF range: {rf_mon.index.min().strftime('%Y-%m')} to "
       f"{rf_mon.index.max().strftime('%Y-%m')}")
 
-# %% [markdown]
-# ## 5. Price Cleaning
-
-# %%
+# =============================================================================
+# 5. PRICE CLEANING
+# =============================================================================
 print("\n[4] Cleaning prices ...")
 
 n_low = ((ri_m > 0) & (ri_m < LOW_FLOOR)).sum().sum()
@@ -202,10 +187,9 @@ co2_s1 = co2_s1.ffill(axis=1)
 co2_s2 = co2_s2.ffill(axis=1)
 rev = rev.ffill(axis=1)
 
-# %% [markdown]
-# ## 6. Investment Set (Universe) Construction
-
-# %%
+# =============================================================================
+# 6. INVESTMENT SET (UNIVERSE) CONSTRUCTION
+# =============================================================================
 print("\n[5] Building investment sets ...")
 
 
@@ -249,10 +233,9 @@ for Y in range(START_YEAR, END_YEAR + 1):
 
 years = list(range(START_YEAR, END_YEAR + 1))
 
-# %% [markdown]
-# ## 7. Covariance Estimation (Ledoit-Wolf Shrinkage)
-
-# %%
+# =============================================================================
+# 7. COVARIANCE ESTIMATION (Ledoit-Wolf shrinkage)
+# =============================================================================
 _cov_cache = {}
 
 
@@ -333,10 +316,11 @@ def get_cov(Y):
         _cov_cache[Y] = estimate_cov(universe[Y], _estim_window[Y])
     return _cov_cache[Y]
 
-# %% [markdown]
-# ## 8. Utility Functions
 
-# %%
+# =============================================================================
+# 8. UTILITY FUNCTIONS
+# =============================================================================
+
 def fill_oos_returns(eligible, next_months):
     """Fill missing OOS returns with delisting detection."""
     R_oos = ret_m.loc[eligible].reindex(columns=next_months).copy()
@@ -385,10 +369,10 @@ def vw_weights(Y):
                          else pd.Series(np.ones(len(isins)) / len(isins), index=isins))
     return _vww_cache[Y]
 
-# %% [markdown]
-# ## 9. Min-Variance Optimisation (Part I)
 
-# %%
+# =============================================================================
+# 9. MIN-VARIANCE OPTIMISATION (Part I)
+# =============================================================================
 print("\n[6] Rolling min-variance optimisation ...")
 
 _drifted_w = {}
@@ -452,10 +436,9 @@ for Y in range(START_YEAR, END_YEAR + 1):
 rp_mv = pd.concat(mv_ret).droplevel(0).sort_index()
 rp_mv.index = pd.DatetimeIndex(rp_mv.index)
 
-# %% [markdown]
-# ## 10. Value-Weighted Benchmark (Monthly Rebalancing)
-
-# %%
+# =============================================================================
+# 10. VALUE-WEIGHTED BENCHMARK (MONTHLY REBALANCING)
+# =============================================================================
 print("\n[7] Value-weighted benchmark ...")
 
 vw_ret = {}
@@ -485,10 +468,9 @@ for Y in range(START_YEAR, END_YEAR + 1):
 rp_vw = pd.concat(vw_ret).droplevel(0).sort_index()
 rp_vw.index = pd.DatetimeIndex(rp_vw.index)
 
-# %% [markdown]
-# ## 11. Performance Statistics
-
-# %%
+# =============================================================================
+# 11. PERFORMANCE STATISTICS
+# =============================================================================
 print("\n[8] Performance statistics ...")
 
 
@@ -522,10 +504,9 @@ stats_df = pd.DataFrame([
 
 print("\n", stats_df.to_string())
 
-# %% [markdown]
-# ## 12. Verification Checks
-
-# %%
+# =============================================================================
+# 12. VERIFICATION CHECKS
+# =============================================================================
 print("\n[9] Verification checks ...")
 
 for Y, w in mv_w_dict.items():
@@ -546,10 +527,9 @@ assert rp_mv.isna().sum() == 0, "NaN in min-var returns"
 assert rp_vw.isna().sum() == 0, "NaN in VW returns"
 print("   ✓ No NaN in return series")
 
-# %% [markdown]
-# ## 13. Top Holdings
-
-# %%
+# =============================================================================
+# 13. TOP HOLDINGS
+# =============================================================================
 print("\n[10] Top 10 holdings (Min-Var):")
 
 for Y in [2013, 2018, 2024]:
@@ -563,10 +543,9 @@ for Y in [2013, 2018, 2024]:
         cty = cty[0] if len(cty) else ""
         print(f"   {rk:2d}. {isin_name.get(isin, isin):<40s} {cty:>3s}  {wt * 100:6.2f}%")
 
-# %% [markdown]
-# ## 14. Figures
-
-# %%
+# =============================================================================
+# 14. FIGURES
+# =============================================================================
 print("\n[11] Generating figures ...")
 
 fig, axes = plt.subplots(2, 2, figsize=(14, 10))
@@ -637,10 +616,9 @@ for ext in ("pdf", "png"):
 plt.close()
 print("   Figures saved.")
 
-# %% [markdown]
-# ## 15. Excel Export — Official Template Format
-
-# %%
+# =============================================================================
+# 15. EXCEL EXPORT — Official Template Format
+# =============================================================================
 print("\n[12] Exporting Excel (official template format) ...")
 from openpyxl import load_workbook
 from openpyxl.drawing.image import Image as XlImage
@@ -733,19 +711,17 @@ print(f"   Extended results saved: {xlsx_ext}")
 print("\n" + "=" * 65)
 print("PART I COMPLETE — outputs in", OUT)
 
-# %% [markdown]
-# ---
-# # PART II — Carbon-Aware Portfolio Allocation
-# ---
 
-# %% [markdown]
-# ## 16. Carbon Data Preparation
-
-# %%
+# =============================================================================
+# PART II — Carbon-Aware Portfolio Allocation
+# =============================================================================
 print("\n" + "=" * 65)
 print("SAAM Part II — Carbon-Aware Portfolios (EUR / Scope 1+2)")
 print("=" * 65)
 
+# =============================================================================
+# 16. CARBON DATA PREPARATION
+# =============================================================================
 print("\n[13] Preparing carbon data ...")
 
 co2_tot = co2_s1 + co2_s2
@@ -754,10 +730,9 @@ rev_m = rev / 1000.0  # thousands → millions USD
 with np.errstate(divide="ignore", invalid="ignore"):
     CI_firm = co2_tot / rev_m
 
-# %% [markdown]
-# ## 17. Carbon Metrics — Baseline Portfolios
-
-# %%
+# =============================================================================
+# 17. CARBON METRICS — BASELINE PORTFOLIOS
+# =============================================================================
 print("\n[14] Computing baseline portfolio carbon metrics ...")
 
 
@@ -797,10 +772,9 @@ print(mv_carbon.round(2).to_string())
 print("\n   Value-Weighted portfolio P^(vw):")
 print(vw_carbon.round(2).to_string())
 
-# %% [markdown]
-# ## 18. Top Carbon Contributors
-
-# %%
+# =============================================================================
+# 18. TOP CARBON CONTRIBUTORS
+# =============================================================================
 print("\n[15] Top carbon contributors ...")
 
 
@@ -824,10 +798,9 @@ for Y in snapshot_years:
     print(f"\n   Y={Y}")
     print(top_n_by_CI(Y, 10).to_string(index=False))
 
-# %% [markdown]
-# ## 19. Plot — Carbon Metrics Time Series
-
-# %%
+# =============================================================================
+# 19. PLOT — CARBON METRICS TIME SERIES
+# =============================================================================
 print("\n[16] Plotting baseline carbon metrics ...")
 
 fig, axes = plt.subplots(1, 2, figsize=(14, 4.5))
@@ -860,21 +833,19 @@ for ext in ("pdf", "png"):
     plt.savefig(f"{OUT}SAAM_Part2_carbon_baseline.{ext}", dpi=150, bbox_inches="tight")
 plt.close()
 print("   Saved: SAAM_Part2_carbon_baseline.{pdf,png}")
+
 print("\n[Section 3.1 complete]")
 
-# %% [markdown]
-# ---
-# ## Section 3.2 — Active Investor: MV with CF ≤ 0.5 × CF(MV)
-# ---
-
-# %% [markdown]
-# ## 20. CF Targets and Feasibility
-
-# %%
+# =============================================================================
+# SECTION 3.2 — Active Investor: MV with CF ≤ 0.5 × CF(MV)
+# =============================================================================
 print("\n" + "=" * 65)
 print("Section 3.2 — Active Investor: MV with CF ≤ 0.5 × CF(MV)")
 print("=" * 65)
 
+# =============================================================================
+# 20. CF TARGETS AND FEASIBILITY
+# =============================================================================
 cf_target_mv = (mv_carbon["CF"] * 0.5).rename("target_CF").copy()
 print("\n[17] CF targets for P^(mv)_oos(0.5):")
 print(cf_target_mv.round(3).to_string())
@@ -918,10 +889,11 @@ for Y in years:
     else:
         adj_targets[Y] = target_raw
 
-# %% [markdown]
-# ## 21. Constrained Min-Variance Optimizer
+# =============================================================================
+# 21. CONSTRAINED MIN-VARIANCE OPTIMIZER
+# =============================================================================
 
-# %%
+
 def min_var_cf_constrained(Sigma, c, target, isins, Y, prev_drift=None):
     N = Sigma.shape[0]
     valid = np.isfinite(c)
@@ -948,10 +920,10 @@ def min_var_cf_constrained(Sigma, c, target, isins, Y, prev_drift=None):
         options={"ftol": 1e-10, "maxiter": 2000},
     )
 
-# %% [markdown]
-# ## 22. Rolling Loop — P^(mv)_oos(0.5)
 
-# %%
+# =============================================================================
+# 22. ROLLING LOOP — P^(mv)_oos(0.5)
+# =============================================================================
 print("\n[18] Rolling MV(0.5) optimization ...")
 
 mv05_w_dict = {}
@@ -987,10 +959,9 @@ for Y in years:
 rp_mv05 = pd.concat(mv05_ret).droplevel(0).sort_index()
 rp_mv05.index = pd.DatetimeIndex(rp_mv05.index)
 
-# %% [markdown]
-# ## 23. Verification — MV05
-
-# %%
+# =============================================================================
+# 23. VERIFICATION — MV05
+# =============================================================================
 print("\n[19] Verification — P^(mv)_oos(0.5) ...")
 
 mv05_carbon = pd.DataFrame(
@@ -1005,10 +976,9 @@ cf_check["slack"] = cf_check["target_eff"] - cf_check["CF_realized"]
 print("\n   CF realized vs target:")
 print(cf_check.round(3).to_string())
 
-# %% [markdown]
-# ## 24. Performance — MV05
-
-# %%
+# =============================================================================
+# 24. PERFORMANCE — MV05
+# =============================================================================
 print("\n[20] Performance — MV vs MV(0.5) ...")
 stats_mv05 = pd.DataFrame([
     compute_perf(rp_mv, rf_mon, "P^(mv)_oos"),
@@ -1017,10 +987,9 @@ stats_mv05 = pd.DataFrame([
 ]).set_index("Portfolio")
 print(stats_mv05.to_string())
 
-# %% [markdown]
-# ## 25. Composition Shifts — MV05 vs MV
-
-# %%
+# =============================================================================
+# 25. COMPOSITION SHIFTS — MV05 vs MV
+# =============================================================================
 print("\n[21] Composition shifts — top firms excluded/overweighted vs MV ...")
 
 
@@ -1045,10 +1014,9 @@ def composition_diff(Y, top_n=5):
 for Y in snapshot_years:
     composition_diff(Y, top_n=5)
 
-# %% [markdown]
-# ## 26. Plots — Section 3.2
-
-# %%
+# =============================================================================
+# 26. PLOTS — Section 3.2
+# =============================================================================
 print("\n[22] Plots ...")
 
 fig, axes = plt.subplots(2, 2, figsize=(14, 9))
@@ -1112,15 +1080,9 @@ plt.close()
 print("   Saved: SAAM_Part2_section32.{pdf,png}")
 print("\n[Section 3.2 complete]")
 
-# %% [markdown]
-# ---
-# ## Section 3.3 — Passive Investor: TE-Min with CF ≤ 0.5 × CF(VW)
-# ---
-
-# %% [markdown]
-# ## 27. CF Targets for VW
-
-# %%
+# =============================================================================
+# SECTION 3.3 — Passive Investor: TE-Min with CF ≤ 0.5 × CF(VW)
+# =============================================================================
 print("\n" + "=" * 65)
 print("Section 3.3 — Passive Investor: TE-Min with CF ≤ 0.5 × CF(VW)")
 print("=" * 65)
@@ -1139,10 +1101,7 @@ for Y in years:
     else:
         adj_targets_vw[Y] = target_raw
 
-# %% [markdown]
-# ## 28. TE-Min Optimizer with CF Constraint
 
-# %%
 def min_te_cf_constrained(Sigma, w_bench, c, target, isins):
     N = Sigma.shape[0]
     valid = np.isfinite(c)
@@ -1165,10 +1124,7 @@ def min_te_cf_constrained(Sigma, w_bench, c, target, isins):
         options={"ftol": 1e-10, "maxiter": 3000},
     )
 
-# %% [markdown]
-# ## 29. Rolling VW(0.5) Optimization
 
-# %%
 print("\n[24] Rolling VW(0.5) optimization ...")
 
 vw05_w_dict = {}
@@ -1202,10 +1158,9 @@ for Y in years:
 rp_vw05 = pd.concat(vw05_ret).droplevel(0).sort_index()
 rp_vw05.index = pd.DatetimeIndex(rp_vw05.index)
 
-# %% [markdown]
-# ## 30. Verification — VW05
-
-# %%
+# =============================================================================
+# 25. VERIFICATION — VW05
+# =============================================================================
 print("\n[25] Verification — P^(vw)_oos(0.5) ...")
 
 vw05_carbon = pd.DataFrame(
@@ -1218,10 +1173,9 @@ cf_check_vw = pd.DataFrame({
 print("\n   CF realized vs target:")
 print(cf_check_vw.round(3).to_string())
 
-# %% [markdown]
-# ## 31. Performance — VW05
-
-# %%
+# =============================================================================
+# 26. PERFORMANCE — VW05
+# =============================================================================
 print("\n[26] Performance — VW vs VW(0.5) ...")
 stats_vw05 = pd.DataFrame([
     compute_perf(rp_vw, rf_mon, "P^(vw) (benchmark)"),
@@ -1230,10 +1184,9 @@ stats_vw05 = pd.DataFrame([
 ]).set_index("Portfolio")
 print(stats_vw05.to_string())
 
-# %% [markdown]
-# ## 32. Plots — Section 3.3
-
-# %%
+# =============================================================================
+# 27. PLOTS — Section 3.3
+# =============================================================================
 print("\n[27] Plots ...")
 
 fig, axes = plt.subplots(2, 2, figsize=(14, 9))
@@ -1291,20 +1244,9 @@ plt.close()
 print("   Saved: SAAM_Part2_section33.{pdf,png}")
 print("\n[Section 3.3 complete]")
 
-# %% [markdown]
-# ---
-# ## Section 4.1 — Net-Zero Glide Path
-# ---
-
-# %% [markdown]
-# ## 33. NZ Target Calculation
-
-# %%
-print("\n[Section 4.1 complete] — Part II finished.")
-print("\n" + "=" * 65)
-print("ALL DONE — outputs in", OUT)
-print("=" * 65)
-
+# =============================================================================
+# SECTION 4.1 — Net-Zero Glide Path
+# =============================================================================
 print("\n" + "=" * 65)
 print("Section 4.1 — Net-Zero Glide Path: TE-Min with annual 10% cut")
 print("=" * 65)
@@ -1329,10 +1271,6 @@ for Y in years:
     else:
         adj_targets_nz[Y] = target_raw
 
-# %% [markdown]
-# ## 34. Rolling VW(NZ) Optimization
-
-# %%
 print("\n[28] Rolling VW(NZ) optimization ...")
 
 vwnz_w_dict = {}
@@ -1366,10 +1304,9 @@ for Y in years:
 rp_vwnz = pd.concat(vwnz_ret).droplevel(0).sort_index()
 rp_vwnz.index = pd.DatetimeIndex(rp_vwnz.index)
 
-# %% [markdown]
-# ## 35. Verification — VWNZ
-
-# %%
+# =============================================================================
+# 29. VERIFICATION — VWNZ
+# =============================================================================
 print("\n[29] Verification — P^(vw)_oos(NZ) ...")
 
 vwnz_carbon = pd.DataFrame(
@@ -1383,10 +1320,9 @@ cf_check_nz = pd.DataFrame({
 print("\n   Realized CF vs target (and as % of 2013 baseline):")
 print(cf_check_nz.round(3).to_string())
 
-# %% [markdown]
-# ## 36. Performance — All Passive
-
-# %%
+# =============================================================================
+# 30. PERFORMANCE — All Passive
+# =============================================================================
 print("\n[30] Performance — passive investor portfolios ...")
 stats_nz = pd.DataFrame([
     compute_perf(rp_vw, rf_mon, "P^(vw)"),
@@ -1395,10 +1331,9 @@ stats_nz = pd.DataFrame([
 ]).set_index("Portfolio")
 print(stats_nz.to_string())
 
-# %% [markdown]
-# ## 37. Plots — Section 4.1
-
-# %%
+# =============================================================================
+# 31. PLOTS — Section 4.1
+# =============================================================================
 print("\n[31] Plots ...")
 
 fig, axes = plt.subplots(2, 2, figsize=(14, 9))
