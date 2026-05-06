@@ -1,0 +1,4 @@
+Portfolio,Ann. Return Arith. (%),Ann. Return Geom. (%),Ann. Vol (%),Sharpe,Min Mo. (%),Max Mo. (%),Max DD (%)
+P^(vw) (benchmark),8.19,7.16,15.87,0.406,-15.34,18.27,-28.17
+P^(vw)_oos(0.5)  [LW-CC],7.86,6.79,16.04,0.381,-16.02,18.77,-27.97
+P^(vw)_oos(0.5)  [LW-SI],7.86,6.78,16.04,0.381,-16.02,18.76,-27.97
